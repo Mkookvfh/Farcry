@@ -1,4 +1,4 @@
-name: Build PS2 game[span_3](start_span)(end_span)
+name: Build PS2 game
 
 on:
   push:
@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apt-get update && apt-get install -y make build-essential git
 
       - name: Show toolchain paths
         run: |
