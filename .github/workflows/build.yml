@@ -24,7 +24,7 @@ jobs:
           ls "$PS2DEV/gsKit" || true
 
       - name: Build
-        run: make clean all
+        run: make
 
       - name: Upload game file
         uses: actions/upload-artifact@v4
