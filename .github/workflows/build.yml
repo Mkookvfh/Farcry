@@ -13,10 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tools
-        run: |
-          apt-get update && apt-get install -y make build-essential git
-
       - name: Show toolchain paths
         run: |
           echo "PS2DEV=$PS2DEV"
