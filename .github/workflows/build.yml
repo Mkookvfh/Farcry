@@ -10,8 +10,18 @@ jobs:
     container: ps2dev/ps2dev:latest
 
     steps:
+      - name: Install build tools
+        run: apk add --no-cache build-base git
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Show toolchain paths
+        run: |
+          echo "PS2DEV=$PS2DEV"
+          echo "PS2SDK=$PS2SDK"
+          ls "$PS2DEV" || true
+          ls "$PS2DEV/gsKit" || true
 
       - name: Build
         run: make clean all
