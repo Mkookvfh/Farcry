@@ -1,4 +1,4 @@
-name: Build PS2 game
+name: Build PS2 game[span_3](start_span)[span_3](end_span)
 
 on:
   push:
@@ -10,9 +10,6 @@ jobs:
     container: ps2dev/ps2dev:latest
 
     steps:
-      - name: Install build tools
-        run: apk add --no-cache build-base git
-
       - name: Checkout
         uses: actions/checkout@v4
 
