@@ -1,4 +1,4 @@
-name: Build PS2 game[span_3](start_span)[span_3](end_span)
+name: Build PS2 game[span_3](start_span)(end_span)
 
 on:
   push:
