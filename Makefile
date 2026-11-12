@@ -1,18 +1,17 @@
-# ชื่อไฟล์ ELF ผลลัพธ์ของเกม
+# ชื่อไฟล์ ELF ผลลัพธ์ของเกม PS2
 EE_BIN = outpost_island.elf
 
-# รายชื่อไฟล์โค้ดหลัก (เช่น ถ้ามีไฟล์ main.c ให้ใส่ main.o)
+# ไฟล์ C หลักของโปรเจกต์ (ถ้ามีไฟล์ main.c ให้ใช้ main.o)
 EE_OBJS = main.o
 
-# ไลบรารีมาตรฐานสำหรับใช้กราฟิกและระบบของ PS2
-EE_LIBS = -lgraph -ldraw -lpacket -ldma -lmgr -lc
+# ไลบรารีพื้นฐานของระบบ PS2
+EE_LIBS = -lkernel
 
 all: $(EE_BIN)
 
 clean:
 	rm -f *.o $(EE_BIN)
 
-# เชื่อมโยงกับชุดพัฒนา PS2SDK มาตรฐาน
+# ดึงค่าตั้งค่ามาตรฐานจาก PS2SDK
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
-include $(PS2SDK)/samples/Makefile.rules
