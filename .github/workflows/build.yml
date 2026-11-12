@@ -1,0 +1,23 @@
+name: Build PS2 game
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ps2dev/ps2dev:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: make clean all
+
+      - name: Upload game file
+        uses: actions/upload-artifact@v4
+        with:
+          name: outpost_island
+          path: outpost_island.elf
