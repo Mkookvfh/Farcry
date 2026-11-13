@@ -1,5 +1,5 @@
-EE_INCS += -I$(PS2SDK)/include
-EE_LIBS += -lgsKit -ldraw -ldma -lgraph -lpad -lm -lps2gl
+EE_INCS += -I$(PS2SDK)/include -I$(PS2SDK)/ports/include
+EE_LIBS += -lgsKit -ldraw -ldma -lgraph -lpad -lm -lps2gl -lgl
 EE_CFLAGS += -O2 -DNTSC_480I
 EE_BIN = TROPIC_ASSAULT_FIXED.ELF
 EE_OBJS = main.o
