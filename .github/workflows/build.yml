@@ -1,460 +1,202 @@
-name: Build PS2 game
+/*
+ * Assassin's Creed inspired Side-View Parkour + Stealth
+ * PS2 Homebrew (ps2sdk + gsKit)
+ * Features: Parkour, Stealth, Assassination, Improved Physics, AC-style character
+ */
 
-on:
-  push:
-  workflow_dispatch:
+#include <stdio.h>
+#include <tamtypes.h>
+#include <sifrpc.h>
+#include <loadfile.h>
+#include <libpad.h>
+#include <gsKit.h>
+#include <dmaKit.h>
+#include <math.h>
+#include <string.h>
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    container: ps2dev/ps2dev:latest
+#define SCREEN_W 640
+#define SCREEN_H 448
+#define TILE 32
+#define MAP_W 90
+#define MAP_H 18
 
-    steps:
-      - name: Install build tools
-        run: apk add --no-cache build-base git
+GSGLOBAL *gsGlobal;
 
-      - name: Write upgraded source code
-        run: |
-          cat > Makefile <<'MAKEFILE_EOF'
-          EE_BIN = outpost_island.elf
-          EE_OBJS = main.o
-          EE_INCS += -I$(PS2DEV)/gsKit/include
-          EE_LDFLAGS += -L$(PS2DEV)/gsKit/lib
-          EE_LIBS = -lgskit -ldmakit -lpad -lm
-          EE_CFLAGS += -O3 -Wall -funroll-loops -fomit-frame-pointer
-          all: $(EE_BIN)
-          include $(PS2SDK)/samples/Makefile.pref
-          include $(PS2SDK)/samples/Makefile.eeglobal
-          MAKEFILE_EOF
+unsigned char map[MAP_H][MAP_W];
 
-          cat > main.c <<'C_EOF'
-          #include <tamtypes.h>
-          #include <kernel.h>
-          #include <sifrpc.h>
-          #include <loadfile.h>
-          #include <stdio.h>
-          #include <stdlib.h>
-          #include <string.h>
-          #include <malloc.h>
-          #include <math.h>
-          #include <libpad.h>
-          #include <gsKit.h>
-          #include <dmaKit.h>
-          #include <gsToolkit.h>
+typedef struct {
+    float x, y;
+    float vx, vy;
+    int onGround;
+    int onWall;
+    int climbing;
+    int facing;
+    int hidden;
+    int canAssassinate;
+    int state;          // 0 idle, 1 run, 2 jump, 3 climb
+    int animFrame;
+    int animTimer;
+} Player;
 
-          #define SCREEN_W 640
-          #define SCREEN_H 448
-          #define MAP_W 32
-          #define MAP_H 32
-          #define TEX_SIZE 64
-          #define MAX_ENEMIES 10
+typedef struct {
+    float x, y;
+    float vx;
+    int alive;
+    int facing;
+    int patrolMin, patrolMax;
+} Enemy;
 
-          static char padBuf[256] __attribute__((aligned(64)));
+Player P;
+Enemy E[8];
+int enemyCount = 0;
+float camX = 0.0f;
 
-          static const char WORLD_MAP[MAP_H][MAP_W + 1] = {
-              "11111111111111111111111111111111",
-              "1........................1....11",
-              "1.........................1...11",
-              "1.........33333.33..1..2.......1",
-              "1.........3......3...1...1.....1",
-              "1.........3......3.............1",
-              "1................3.............1",
-              "1.........3......3....333.333..1",
-              "11...1....33333.33....3.....3..1",
-              "1...111...............3.....3..1",
-              "1....1..111....1.11.........3..1",
-              "1.......1.......1.1...3.....3..1",
-              "1............1........333.333..1",
-              "1..............................1",
-              "1..............1...1...........1",
-              "1...333.3333..111121......11.111",
-              "11..3......3...1.12..11122.1...1",
-              "11.........3..2..22..1..2..11..1",
-              "1...3......3...................1",
-              "1...3......3..1..............1.1",
-              "1...3......3..1..333333.333....1",
-              "11..333.3333.....3........3....1",
-              "11...............3........3...21",
-              "11...............3........3....1",
-              "11.......111..1..3........3....1",
-              "1.........1...1...........3....1",
-              "11....112.21211..3........3....1",
-              "11.2.....1...22..333333.333....1",
-              "112..1111....................1.1",
-              "1111..111....1...............111",
-              "11111111111111111111111111111111",
-              "11111111111111111111111111111111"
-          };
+static char padBuf[256] __attribute__((aligned(64)));
 
-          typedef struct {
-              float x, y;
-              int hp;
-              int alive;
-              float hurt_timer;
-          } Enemy;
+void loadModules() {
+    SifLoadModule("rom0:SIO2MAN", 0, NULL);
+    SifLoadModule("rom0:PADMAN", 0, NULL);
+}
 
-          static Enemy enemies[MAX_ENEMIES];
-          static const float ENEMY_SPAWNS[MAX_ENEMIES][2] = {
-              {12.5f, 6.5f},  {14.5f, 5.5f},  {24.5f, 10.5f}, {26.5f, 8.5f},  {8.5f, 17.5f},
-              {21.5f, 23.5f}, {23.5f, 24.5f}, {16.5f, 13.5f}, {6.5f, 25.5f},  {27.5f, 19.5f}
-          };
+void initPad() {
+    padInit(0);
+    padPortOpen(0, 0, padBuf);
+}
 
-          static GSTEXTURE wallTex[4];
-          static GSTEXTURE enemyTex;
-          static float zBuffer[SCREEN_W];
+int readPad(struct padButtonStatus *btns) {
+    return padRead(0, 0, btns) != 0;
+}
 
-          // สร้าง Texture แบบ Procedural ใน RAM และอัปโหลดเข้า VRAM
-          static void create_textures(GSGLOBAL *gsGlobal) {
-              for (int t = 0; t < 4; t++) {
-                  wallTex[t].Width = TEX_SIZE;
-                  wallTex[t].Height = TEX_SIZE;
-                  wallTex[t].PSM = GS_PSM_CT32;
-                  wallTex[t].Filter = GS_FILTER_LINEAR;
-                  wallTex[t].Mem = (u32 *)memalign(128, TEX_SIZE * TEX_SIZE * 4);
-                  wallTex[t].Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(TEX_SIZE, TEX_SIZE, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+void playSfx(int id) {
+    // ยังไม่มีไฟล์เสียงจริง
+    // id 0 = กระโดด, 1 = ลอบสังหาร, 2 = เดิน
+    (void)id;
+}
 
-                  for (int y = 0; y < TEX_SIZE; y++) {
-                      for (int x = 0; x < TEX_SIZE; x++) {
-                          u8 r = 100, g = 100, b = 100;
-                          int noise = ((x * 37 + y * 17 + t * 53) & 31) - 16;
+void generateMap() {
+    memset(map, 0, sizeof(map));
 
-                          if (t == 1) {
-                              // กำแพงหินเกาะ / อิฐ
-                              int brick = ((y / 8) % 2 == 0) ? (x % 16 == 0) : ((x + 8) % 16 == 0);
-                              if (y % 8 == 0 || brick) {
-                                  r = 55; g = 58; b = 52;
-                              } else {
-                                  r = 115 + noise; g = 122 + noise; b = 105 + noise;
-                              }
-                          } else if (t == 2) {
-                              // ประตูเหล็ก / โลหะสนิม
-                              int border = (x < 4 || x >= TEX_SIZE - 4 || y < 4 || y >= TEX_SIZE - 4);
-                              int stripe = ((x + y) / 6) % 2 == 0;
-                              if (border) {
-                                  r = 60; g = 65; b = 70;
-                              } else if (y > TEX_SIZE - 12 && stripe) {
-                                  r = 200; g = 160; b = 20;
-                              } else {
-                                  r = 90 + noise; g = 105 + noise; b = 120 + noise;
-                              }
-                          } else if (t == 3) {
-                              // บังเกอร์คอนกรีตลายพรางทหาร
-                              int camo = ((x / 8 + y / 6) % 3);
-                              if (camo == 0) { r = 65 + noise; g = 95 + noise; b = 55 + noise; }
-                              else if (camo == 1) { r = 95 + noise; g = 85 + noise; b = 60 + noise; }
-                              else { r = 45 + noise; g = 65 + noise; b = 45 + noise; }
-                          }
-                          wallTex[t].Mem[y * TEX_SIZE + x] = GS_SETREG_RGBAQ(r, g, b, 0x80, 0x00);
-                      }
-                  }
-                  gsKit_texture_upload(gsGlobal, &wallTex[t]);
-              }
+    for(int x = 0; x < MAP_W; x++) {
+        map[MAP_H-1][x] = 1;
+        map[MAP_H-2][x] = 1;
+    }
 
-              // สร้าง Sprite ศัตรู (ทหารรับจ้าง)
-              enemyTex.Width = TEX_SIZE;
-              enemyTex.Height = TEX_SIZE;
-              enemyTex.PSM = GS_PSM_CT32;
-              enemyTex.Filter = GS_FILTER_LINEAR;
-              enemyTex.Mem = (u32 *)memalign(128, TEX_SIZE * TEX_SIZE * 4);
-              enemyTex.Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(TEX_SIZE, TEX_SIZE, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+    // อาคาร + กำแพงปีน + เงา
+    for(int x = 3; x < 14; x++) map[13][x] = 1;
+    for(int y = 13; y < 16; y++) { map[y][3] = 2; map[y][13] = 2; }
+    for(int x = 5; x < 9; x++) map[14][x] = 3;
 
-              for (int y = 0; y < TEX_SIZE; y++) {
-                  for (int x = 0; x < TEX_SIZE; x++) {
-                      u32 col = GS_SETREG_RGBAQ(0, 0, 0, 0x00, 0x00); // โปร่งใส
-                      int dx = abs(x - 32);
-                      // หัว + หมวกเหล็ก
-                      if (y >= 8 && y <= 20 && dx <= 7) {
-                          col = (y < 14) ? GS_SETREG_RGBAQ(50, 75, 45, 0x80, 0x00) : GS_SETREG_RGBAQ(210, 165, 130, 0x80, 0x00);
-                      }
-                      // ลำตัว + เสื้อเกราะ
-                      else if (y > 20 && y <= 44 && dx <= 12) {
-                          col = GS_SETREG_RGBAQ(145, 45, 40, 0x80, 0x00);
-                          if (dx <= 6 && y > 24 && y < 38) col = GS_SETREG_RGBAQ(55, 60, 55, 0x80, 0x00);
-                      }
-                      // ขา
-                      else if (y > 44 && y <= 62 && dx >= 2 && dx <= 10) {
-                          col = GS_SETREG_RGBAQ(45, 55, 40, 0x80, 0x00);
-                      }
-                      enemyTex.Mem[y * TEX_SIZE + x] = col;
-                  }
-              }
-              gsKit_texture_upload(gsGlobal, &enemyTex);
-          }
+    for(int x = 18; x < 32; x++) map[10][x] = 1;
+    for(int y = 10; y < 16; y++) { map[y][18] = 2; map[y][31] = 2; }
+    for(int x = 22; x < 28; x++) map[11][x] = 3;
 
-          static void reset_game(float *px, float *py, float *dirX, float *dirY, float *planeX, float *planeY, int *hp, int *ammo) {
-              *px = 3.5f; *py = 3.5f;
-              *dirX = 1.0f; *dirY = 0.0f;
-              *planeX = 0.0f; *planeY = 0.66f;
-              *hp = 100;
-              *ammo = 30;
-              for (int i = 0; i < MAX_ENEMIES; i++) {
-                  enemies[i].x = ENEMY_SPAWNS[i][0];
-                  enemies[i].y = ENEMY_SPAWNS[i][1];
-                  enemies[i].hp = 100;
-                  enemies[i].alive = 1;
-                  enemies[i].hurt_timer = 0.0f;
-              }
-          }
+    for(int x = 36; x < 42; x++) map[12][x] = 1;
+    for(int x = 46; x < 55; x++) map[8][x] = 1;
+    for(int y = 8; y < 15; y++) map[y][46] = 2;
 
-          int main(int argc, char *argv[]) {
-              sceSifInitRpc(0);
-              sceSifLoadFileInit();
-              sceSifLoadModule("rom0:SIO2MAN", 0, NULL);
-              sceSifLoadModule("rom0:PADMAN", 0, NULL);
+    for(int x = 60; x < 78; x++) map[6][x] = 1;
+    for(int y = 6; y < 14; y++) { map[y][60] = 2; map[y][77] = 2; }
+    for(int x = 65; x < 73; x++) map[7][x] = 3;
 
-              padInit(0);
-              padPortOpen(0, 0, padBuf);
+    // Ledges
+    map[14][15] = 4; map[14][16] = 4;
+    map[11][33] = 4; map[11][34] = 4;
+    map[9][43] = 4;  map[9][44] = 4;
+    map[7][56] = 4;  map[7][57] = 4;
+}
 
-              GSGLOBAL *gsGlobal = gsKit_init_global();
-              gsGlobal->Mode = GS_MODE_NTSC;
-              gsGlobal->Interlace = GS_INTERLACED;
-              gsGlobal->Field = GS_FIELD;
-              gsGlobal->Width = SCREEN_W;
-              gsGlobal->Height = SCREEN_H;
-              gsGlobal->PSM = GS_PSM_CT32;
-              gsGlobal->PSMZ = GS_PSMZ_16S;
-              gsGlobal->DoubleBuffering = GS_SETTING_ON;
-              gsGlobal->ZBuffering = GS_SETTING_OFF;
-              gsGlobal->PrimAlphaEnable = GS_SETTING_ON;
-              gsGlobal->PrimAAEnable = GS_SETTING_ON;
+void initGS() {
+    gsGlobal = gsKit_init_global();
+    gsGlobal->Mode = GS_MODE_NTSC;
+    gsGlobal->Interlace = GS_INTERLACED;
+    gsGlobal->Field = GS_FIELD;
+    gsGlobal->Width = SCREEN_W;
+    gsGlobal->Height = SCREEN_H;
+    gsGlobal->PSMZ = GS_PSMZ_16S;
+    gsKit_init_screen(gsGlobal);
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_chan_init(DMA_CHANNEL_GIF);
+    gsKit_mode_switch(gsGlobal, GS_ONESHOT);
+}
 
-              dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
-              dmaKit_chan_init(DMA_CHANNEL_GIF);
+int solid(int tx, int ty) {
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return 1;
+    return map[ty][tx] == 1 || map[ty][tx] == 4;
+}
 
-              gsKit_init_screen(gsGlobal);
-              gsKit_mode_switch(gsGlobal, GS_ONESHOT);
-              gsKit_set_primalpha(gsGlobal, GS_SETREG_ALPHA(0, 1, 0, 1, 0), 0);
-              gsKit_set_test(gsGlobal, GS_ATEST_ON);
+int climbable(int tx, int ty) {
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return 0;
+    return map[ty][tx] == 2;
+}
 
-              create_textures(gsGlobal);
+int isShadow(int tx, int ty) {
+    if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return 0;
+    return map[ty][tx] == 3;
+}
 
-              float posX, posY, dirX, dirY, planeX, planeY;
-              int hp, ammo;
-              reset_game(&posX, &posY, &dirX, &dirY, &planeX, &planeY, &hp, &ammo);
+void updatePlayer(struct padButtonStatus *btns) {
+    u32 btn = 0xffff ^ btns->btns;
 
-              float muzzle_timer = 0.0f;
-              float bob_phase = 0.0f;
-              u32 old_pad = 0;
-              struct padButtonStatus buttons;
+    float accel     = 0.48f;
+    float maxSpeed  = 2.65f;
+    float friction  = 0.82f;
+    float jumpForce = -8.1f;
+    float gravity   = 0.36f;
+    float maxFall   = 10.5f;
 
-              // สีท้องฟ้าและพื้นดินแบบไล่เฉด (Gouraud Shading)
-              u64 skyTop = GS_SETREG_RGBAQ(25, 95, 185, 0x80, 0x00);
-              u64 skyHorizon = GS_SETREG_RGBAQ(155, 205, 235, 0x80, 0x00);
-              u64 groundHorizon = GS_SETREG_RGBAQ(35, 55, 30, 0x80, 0x00);
-              u64 groundBottom = GS_SETREG_RGBAQ(75, 110, 55, 0x80, 0x00);
+    // Horizontal
+    if (btn & PAD_LEFT) {
+        P.vx -= accel;
+        P.facing = -1;
+        P.state = 1;
+    } else if (btn & PAD_RIGHT) {
+        P.vx += accel;
+        P.facing = 1;
+        P.state = 1;
+    } else {
+        P.vx *= friction;
+        if (fabsf(P.vx) < 0.12f) P.vx = 0;
+        if (P.onGround) P.state = 0;
+    }
 
-              while (1) {
-                  // อ่านค่าจอย PS2
-                  u32 pad_data = 0;
-                  int state = padGetState(0, 0);
-                  if (state == PAD_STATE_STABLE || state == PAD_STATE_FINDCTP1) {
-                      if (padRead(0, 0, &buttons) != 0) {
-                          pad_data = 0xFFFF ^ buttons.btns;
-                      }
-                  }
-                  u32 new_pad = pad_data & ~old_pad;
-                  old_pad = pad_data;
+    if (P.vx > maxSpeed) P.vx = maxSpeed;
+    if (P.vx < -maxSpeed) P.vx = -maxSpeed;
 
-                  float moveSpeed = (pad_data & PAD_L1) ? 0.14f : 0.08f;
-                  float rotSpeed = 0.055f;
-                  int moving = 0;
+    // Jump
+    if ((btn & PAD_CROSS) && P.onGround) {
+        P.vy = jumpForce;
+        P.onGround = 0;
+        P.state = 2;
+        playSfx(0);
+    }
 
-                  // เดินหน้า / ถอยหลัง (D-Pad หรือ Analog ซ้าย)
-                  if ((pad_data & PAD_UP) || (buttons.ljoy_v < 80)) {
-                      if (WORLD_MAP[(int)posY][(int)(posX + dirX * moveSpeed * 2.0f)] == '.') posX += dirX * moveSpeed;
-                      if (WORLD_MAP[(int)(posY + dirY * moveSpeed * 2.0f)][(int)posX] == '.') posY += dirY * moveSpeed;
-                      moving = 1;
-                  }
-                  if ((pad_data & PAD_DOWN) || (buttons.ljoy_v > 175)) {
-                      if (WORLD_MAP[(int)posY][(int)(posX - dirX * moveSpeed * 2.0f)] == '.') posX -= dirX * moveSpeed;
-                      if (WORLD_MAP[(int)(posY - dirY * moveSpeed * 2.0f)][(int)posX] == '.') posY -= dirY * moveSpeed;
-                      moving = 1;
-                  }
+    // Climb
+    int left = (int)(P.x) / TILE;
+    int right = (int)(P.x + 16) / TILE;
+    int midY = (int)(P.y + 16) / TILE;
 
-                  // หันซ้าย / ขวา (D-Pad หรือ Analog ขวา)
-                  float rot = 0.0f;
-                  if ((pad_data & PAD_LEFT) || (buttons.rjoy_h < 80)) rot = rotSpeed;
-                  if ((pad_data & PAD_RIGHT) || (buttons.rjoy_h > 175)) rot = -rotSpeed;
-                  if (rot != 0.0f) {
-                      float oldDirX = dirX;
-                      dirX = dirX * cosf(rot) - dirY * sinf(rot);
-                      dirY = oldDirX * sinf(rot) + dirY * cosf(rot);
-                      float oldPlaneX = planeX;
-                      planeX = planeX * cosf(rot) - planeY * sinf(rot);
-                      planeY = oldPlaneX * sinf(rot) + planeY * cosf(rot);
-                  }
+    P.onWall = climbable(left-1, midY) || climbable(right+1, midY) ||
+               climbable(left-1, midY-1) || climbable(right+1, midY-1);
 
-                  if (moving) bob_phase += 0.25f;
-                  if (muzzle_timer > 0.0f) muzzle_timer -= 0.15f;
+    if (P.onWall && (btn & PAD_UP)) {
+        P.climbing = 1;
+        P.vy = -2.35f;
+        P.vx *= 0.25f;
+        P.state = 3;
+    } else if (P.climbing && (btn & PAD_DOWN)) {
+        P.vy = 2.15f;
+        P.state = 3;
+    } else {
+        P.climbing = 0;
+    }
 
-                  // รีโหลด (ปุ่ม Square)
-                  if (new_pad & PAD_SQUARE) ammo = 30;
+    // Gravity
+    if (!P.climbing) {
+        P.vy += gravity;
+        if (P.vy > maxFall) P.vy = maxFall;
+    }
 
-                  // ยิงปืน (ปุ่ม R1 หรือ X)
-                  if (((new_pad & PAD_R1) || (new_pad & PAD_CROSS)) && ammo > 0) {
-                      ammo--;
-                      muzzle_timer = 1.0f;
-                      // ตรวจสอบการยิงโดนศัตรูที่อยู่กลางจอ
-                      float bestDist = 999.0f;
-                      int hitIdx = -1;
-                      for (int i = 0; i < MAX_ENEMIES; i++) {
-                          if (!enemies[i].alive) continue;
-                          float dx = enemies[i].x - posX;
-                          float dy = enemies[i].y - posY;
-                          float dist = sqrtf(dx * dx + dy * dy);
-                          float dot = (dx * dirX + dy * dirY) / dist;
-                          if (dot > 0.96f && dist < bestDist) {
-                              bestDist = dist;
-                              hitIdx = i;
-                          }
-                      }
-                      if (hitIdx != -1) {
-                          enemies[hitIdx].hp -= 50;
-                          enemies[hitIdx].hurt_timer = 1.0f;
-                          if (enemies[hitIdx].hp <= 0) enemies[hitIdx].alive = 0;
-                      }
-                  }
+    P.x += P.vx;
+    P.y += P.vy;
 
-                  // รีเซ็ตเกมเมื่อกด Start
-                  if (new_pad & PAD_START) {
-                      reset_game(&posX, &posY, &dirX, &dirY, &planeX, &planeY, &hp, &ammo);
-                  }
-
-                  // 1. วาดท้องฟ้าและพื้นดินไล่เฉดสี (Gouraud Quad)
-                  gsKit_prim_quad_gouraud(gsGlobal, 0, 0, skyTop, SCREEN_W, 0, skyTop,
-                                          0, SCREEN_H / 2, skyHorizon, SCREEN_W, SCREEN_H / 2, skyHorizon, 0);
-                  gsKit_prim_quad_gouraud(gsGlobal, 0, SCREEN_H / 2, groundHorizon, SCREEN_W, SCREEN_H / 2, groundHorizon,
-                                          0, SCREEN_H, groundBottom, SCREEN_W, SCREEN_H, groundBottom, 0);
-
-                  // 2. Raycasting กำแพงพร้อม Texture + Distance Fog
-                  for (int x = 0; x < SCREEN_W; x += 2) {
-                      float cameraX = 2.0f * x / (float)SCREEN_W - 1.0f;
-                      float rayDirX = dirX + planeX * cameraX;
-                      float rayDirY = dirY + planeY * cameraX;
-
-                      int mapX = (int)posX;
-                      int mapY = (int)posY;
-
-                      float deltaDistX = (rayDirX == 0) ? 1e30f : fabsf(1.0f / rayDirX);
-                      float deltaDistY = (rayDirY == 0) ? 1e30f : fabsf(1.0f / rayDirY);
-                      float sideDistX, sideDistY, perpWallDist;
-                      int stepX, stepY, hit = 0, side = 0;
-
-                      if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
-                      else { stepX = 1; sideDistX = (mapX + 1.0f - posX) * deltaDistX; }
-
-                      if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
-                      else { stepY = 1; sideDistY = (mapY + 1.0f - posY) * deltaDistY; }
-
-                      while (hit == 0) {
-                          if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
-                          else { sideDistY += deltaDistY; mapY += stepY; side = 1; }
-                          if (WORLD_MAP[mapY][mapX] != '.') hit = WORLD_MAP[mapY][mapX] - '0';
-                      }
-
-                      if (side == 0) perpWallDist = (sideDistX - deltaDistX);
-                      else perpWallDist = (sideDistY - deltaDistY);
-                      if (perpWallDist < 0.1f) perpWallDist = 0.1f;
-
-                      zBuffer[x] = perpWallDist;
-                      zBuffer[x + 1] = perpWallDist;
-
-                      int lineHeight = (int)(SCREEN_H / perpWallDist);
-                      int drawStart = -lineHeight / 2 + SCREEN_H / 2;
-                      int drawEnd = lineHeight / 2 + SCREEN_H / 2;
-
-                      float wallX = (side == 0) ? (posY + perpWallDist * rayDirY) : (posX + perpWallDist * rayDirX);
-                      wallX -= floorf(wallX);
-                      float texX = wallX * (float)TEX_SIZE;
-
-                      // คำนวณความสว่างตามระยะทาง (Fog) และเงาด้านข้าง (Side Shading)
-                      float fog = 1.0f - (perpWallDist / 22.0f);
-                      if (fog < 0.15f) fog = 0.15f;
-                      if (fog > 1.0f) fog = 1.0f;
-                      if (side == 1) fog *= 0.78f;
-
-                      u8 shade = (u8)(128.0f * fog);
-                      u64 wallColor = GS_SETREG_RGBAQ(shade, shade, shade, 0x80, 0x00);
-
-                      int texID = (hit >= 1 && hit <= 3) ? hit : 1;
-                      gsKit_prim_sprite_texture(gsGlobal, &wallTex[texID],
-                          (float)x, (float)drawStart, texX, 0.0f,
-                          (float)(x + 2), (float)drawEnd, texX + 1.0f, (float)TEX_SIZE,
-                          1.0f, wallColor);
-                  }
-
-                  // 3. วาดศัตรู (Billboards) พร้อม Distance Fog
-                  for (int i = 0; i < MAX_ENEMIES; i++) {
-                      if (!enemies[i].alive) continue;
-                      if (enemies[i].hurt_timer > 0.0f) enemies[i].hurt_timer -= 0.1f;
-
-                      float spriteX = enemies[i].x - posX;
-                      float spriteY = enemies[i].y - posY;
-                      float invDet = 1.0f / (planeX * dirY - dirX * planeY);
-                      float transformX = invDet * (dirY * spriteX - dirX * spriteY);
-                      float transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-
-                      if (transformY > 0.2f) {
-                          int spriteScreenX = (int)((SCREEN_W / 2) * (1.0f + transformX / transformY));
-                          int spriteH = abs((int)(SCREEN_H / transformY));
-                          int spriteW = spriteH;
-                          int drawStartX = spriteScreenX - spriteW / 2;
-                          int drawStartY = SCREEN_H / 2 - spriteH / 2;
-
-                          if (spriteScreenX >= 0 && spriteScreenX < SCREEN_W && transformY < zBuffer[spriteScreenX]) {
-                              float fog = 1.0f - (transformY / 22.0f);
-                              if (fog < 0.2f) fog = 0.2f;
-                              u8 s = (u8)(128.0f * fog);
-                              u64 scol = (enemies[i].hurt_timer > 0.0f)
-                                  ? GS_SETREG_RGBAQ(128, 30, 30, 0x80, 0x00)
-                                  : GS_SETREG_RGBAQ(s, s, s, 0x80, 0x00);
-
-                              gsKit_prim_sprite_texture(gsGlobal, &enemyTex,
-                                  (float)drawStartX, (float)drawStartY, 0.0f, 0.0f,
-                                  (float)(drawStartX + spriteW), (float)(drawStartY + spriteH), (float)TEX_SIZE, (float)TEX_SIZE,
-                                  2.0f, scol);
-                          }
-                      }
-                  }
-
-                  // 4. วาดปืนในมือ + แรงสั่นเวลาเดิน + ประกายไฟตอนยิง (Muzzle Flash)
-                  float bobX = cosf(bob_phase) * 8.0f;
-                  float bobY = fabsf(sinf(bob_phase)) * 8.0f;
-                  float gunX = SCREEN_W * 0.62f + bobX;
-                  float gunY = SCREEN_H - 130.0f + bobY + (muzzle_timer * 15.0f);
-
-                  if (muzzle_timer > 0.0f) {
-                      u64 flashCol = GS_SETREG_RGBAQ(255, 200, 50, 0x60, 0x00);
-                      gsKit_prim_sprite(gsGlobal, gunX - 15, gunY - 45, gunX + 55, gunY + 25, 3.0f, flashCol);
-                  }
-                  // ตัวปืน
-                  gsKit_prim_sprite(gsGlobal, gunX + 10, gunY - 20, gunX + 30, gunY + 60, 3.0f, GS_SETREG_RGBAQ(45, 50, 55, 0x80, 0x00));
-                  gsKit_prim_sprite(gsGlobal, gunX, gunY + 20, gunX + 45, gunY + 140, 3.0f, GS_SETREG_RGBAQ(30, 35, 38, 0x80, 0x00));
-
-                  // 5. วาด Crosshair และแถบพลังชีวิต / กระสุน (HUD)
-                  u64 crossCol = GS_SETREG_RGBAQ(50, 255, 80, 0x80, 0x00);
-                  gsKit_prim_sprite(gsGlobal, SCREEN_W / 2 - 10, SCREEN_H / 2 - 1, SCREEN_W / 2 + 10, SCREEN_H / 2 + 1, 4.0f, crossCol);
-                  gsKit_prim_sprite(gsGlobal, SCREEN_W / 2 - 1, SCREEN_H / 2 - 10, SCREEN_W / 2 + 1, SCREEN_H / 2 + 10, 4.0f, crossCol);
-
-                  // กรอบ HUD ด้านล่าง
-                  gsKit_prim_sprite(gsGlobal, 20, SCREEN_H - 45, 240, SCREEN_H - 15, 4.0f, GS_SETREG_RGBAQ(10, 15, 10, 0x60, 0x00));
-                  // แถบ HP (สีแดง/เขียว)
-                  gsKit_prim_sprite(gsGlobal, 28, SCREEN_H - 37, 28 + (hp * 1.2f), SCREEN_H - 23, 4.0f, GS_SETREG_RGBAQ(200, 45, 45, 0x80, 0x00));
-                  // แถบ Ammo (สีเหลืองทอง)
-                  gsKit_prim_sprite(gsGlobal, 160, SCREEN_H - 37, 160 + (ammo * 2.2f), SCREEN_H - 23, 4.0f, GS_SETREG_RGBAQ(230, 185, 40, 0x80, 0x00));
-
-                  gsKit_queue_exec(gsGlobal);
-                  gsKit_sync_flip(gsGlobal);
-              }
-              return 0;
-          }
-          C_EOF
-          make all
-          ls -la outpost_island.elf
-
-      - name: Upload game file
-        uses: actions/upload-artifact@v4
-        with:
-          name: outpost_island
-          path: outpost_island.elf
-          if-no-files-found: error
+    left = (int)(P.x) / TILE;
