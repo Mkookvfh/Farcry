@@ -10,21 +10,544 @@ jobs:
     container: ps2dev/ps2dev:latest
 
     steps:
+      - name: Install build tools
+        run: apk add --no-cache build-base git
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show toolchain paths
+      - name: Create game source (main.c)
         run: |
-          echo "PS2DEV=$PS2DEV"
-          echo "PS2SDK=$PS2SDK"
-          ls "$PS2DEV" || true
-          ls "$PS2DEV/gsKit" || true
+          cat > main.c <<'MAIN_C_EOF'
+          /*
+           * OUTPOST ISLAND - a small first-person shooter for PlayStation 2
+           *
+           * An original game: clear a jungle island of hostile outpost guards.
+           * Software raycaster drawn with gsKit flat-shaded sprites (one per screen
+           * column), so it needs nothing but ps2sdk + gsKit.
+           *
+           * Controls (DualShock 2):
+           *   Left stick / D-pad Up,Down  move        Right stick / D-pad L,R  turn
+           *   R1 / R2 / Cross            shoot        Square                   reload
+           *   L1 / L2                    sprint       Start                    start / restart
+           */
 
-      - name: Build
-        run: make
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <math.h>
 
-      - name: Upload game file
-        uses: actions/upload-artifact@v4
-        with:
-          name: outpost_island
-          path: outpost_island.elf
+          #include <tamtypes.h>
+          #include <sifrpc.h>
+          #include <loadfile.h>
+          #include <gsKit.h>
+          #include <dmaKit.h>
+          #include <libpad.h>
+
+          #define MAPW         32
+          #define MAPH         32
+          #define NCOLS        160
+          #define MAX_ENEMIES  10
+          #define MAX_PICKUPS  7
+          #define CLIP_SIZE    12
+          #define PI_F         3.14159265f
+          #define TWO_PI_F     6.28318531f
+          #define PLANE_K      0.75f
+          #define FLUSH_EVERY  150
+
+          /* ------------------------------------------------------------------ */
+          /* World data                                                          */
+          /* '.' = open ground, '1' = jungle trees, '2' = rock, '3' = hut wall   */
+          /* ------------------------------------------------------------------ */
+
+          static const char *MAP_ROWS[MAPH] = {
+              "11111111111111111111111111111111",
+              "1........................1....11",
+              "1.........................1...11",
+              "1.........33333.33..1..2.......1",
+              "1.........3......3...1...1.....1",
+              "1.........3......3.............1",
+              "1................3.............1",
+              "1.........3......3....333.333..1",
+              "11...1....33333.33....3.....3..1",
+              "1...111...............3.....3..1",
+              "1...111...............3.....3..1",
+              "1....1..111....1.11.........3..1",
+              "1.......1.......1.1...3.....3..1",
+              "1............1........333.333..1",
+              "1..............................1",
+              "1..............1...1...........1",
+              "1...333.3333..111121......11.111",
+              "11..3......3...1.12..11122.1...1",
+              "11.........3..2..22..1..2..11..1",
+              "1...3......3...................1",
+              "1...3......3..1..............1.1",
+              "1...3......3..1..333333.333....1",
+              "11..333.3333.....3........3....1",
+              "11...............3........3...21",
+              "11...............3........3....1",
+              "11.......111..1..3........3....1",
+              "1.........1...1...........3....1",
+              "11....112.21211..3........3....1",
+              "11.2.....1...22..333333.333....1",
+              "112..1111....................1.1",
+              "1111..111....1...............111",
+              "11111111111111111111111111111111",
+          };
+
+          static const float ENEMY_START[MAX_ENEMIES][2] = {
+              {12.5f, 6.5f},  {14.5f, 5.5f},  {24.5f, 10.5f}, {26.5f, 8.5f},  {8.5f, 17.5f},
+              {10.5f, 20.5f}, {25.5f, 25.5f}, {21.5f, 27.5f}, {29.5f, 18.5f}, {9.5f, 29.5f}
+          };
+
+          /* type: 0 = ammo crate, 1 = medkit */
+          static const float PICKUP_START[MAX_PICKUPS][3] = {
+              {15.5f, 13.5f, 0}, {3.5f, 27.5f, 1}, {2.5f, 11.5f, 0}, {3.5f, 19.5f, 1},
+              {28.5f, 30.5f, 0}, {30.5f, 4.5f, 1}, {16.5f, 30.5f, 0}
+          };
+
+          static unsigned char map[MAPH][MAPW];
+
+          /* ------------------------------------------------------------------ */
+          /* Game state                                                          */
+          /* ------------------------------------------------------------------ */
+
+          enum { ST_TITLE, ST_PLAY, ST_DEAD, ST_WIN };
+
+          typedef struct {
+              float x, y, hp;
+              float cool, flash, hurt, wander, wdir, lost;
+              int alive, state, moving;
+          } Enemy;
+
+          typedef struct {
+              float x, y;
+              int type, active;
+          } Pickup;
+
+          static Enemy  enemies[MAX_ENEMIES];
+          static Pickup pickups[MAX_PICKUPS];
+
+          static int   game_state = ST_TITLE;
+          static float px, py, pa;
+          static float php;
+          static int   clip, reserve, kills;
+          static float reload_t, fire_t, muzzle_t, recoil, hurt_t, bob_t, bob_y;
+
+          static unsigned int rng_state = 12345u;
+
+          static int rnd_i(void)
+          {
+              rng_state = rng_state * 1103515245u + 12345u;
+              return (int)((rng_state >> 16) & 0x7fff);
+          }
+
+          static float rnd_f(void)
+          {
+              return rnd_i() / 32768.0f;
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Input                                                               */
+          /* ------------------------------------------------------------------ */
+
+          static char padBuf[256] __attribute__((aligned(64)));
+
+          static int   pad_buttons = 0, pad_prev = 0;
+          static float stick_lx = 0, stick_ly = 0, stick_rx = 0, stick_ry = 0;
+
+          #define HELD(b)    (pad_buttons & (b))
+          #define PRESSED(b) ((pad_buttons & (b)) && !(pad_prev & (b)))
+
+          static void pad_wait_stable(void)
+          {
+              int i, st;
+              for (i = 0; i < 200000; i++) {
+                  st = padGetState(0, 0);
+                  if (st == PAD_STATE_STABLE || st == PAD_STATE_FINDCTP1)
+                      break;
+              }
+          }
+
+          static void init_pad(void)
+          {
+              SifInitRpc(0);
+              SifLoadModule("rom0:SIO2MAN", 0, NULL);
+              SifLoadModule("rom0:PADMAN", 0, NULL);
+              padInit(0);
+              padPortOpen(0, 0, padBuf);
+              pad_wait_stable();
+              padSetMainMode(0, 0, PAD_MMODE_DUALSHOCK, PAD_MMODE_LOCK);
+              pad_wait_stable();
+          }
+
+          static float stick_axis(unsigned char v)
+          {
+              float f = ((int)v - 128) / 128.0f;
+              if (f > -0.22f && f < 0.22f)
+                  return 0.0f;
+              if (f > 0.0f)
+                  return (f - 0.22f) / 0.78f;
+              return (f + 0.22f) / 0.78f;
+          }
+
+          static void read_pad(void)
+          {
+              struct padButtonStatus b;
+              int st = padGetState(0, 0);
+
+              pad_prev = pad_buttons;
+              if (st == PAD_STATE_STABLE || st == PAD_STATE_FINDCTP1) {
+                  if (padRead(0, 0, &b) != 0) {
+                      pad_buttons = 0xffff ^ b.btns;
+                      stick_lx = stick_axis(b.ljoy_h);
+                      stick_ly = stick_axis(b.ljoy_v);
+                      stick_rx = stick_axis(b.rjoy_h);
+                      stick_ry = stick_axis(b.rjoy_v);
+                  }
+              }
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Graphics helpers                                                    */
+          /* ------------------------------------------------------------------ */
+
+          static GSGLOBAL *gs;
+          static float SW, SH, CW;
+          static int   prim_count;
+          static float zbuf[NCOLS];
+
+          static int clamp255(int v)
+          {
+              if (v < 0)
+                  return 0;
+              if (v > 255)
+                  return 255;
+              return v;
+          }
+
+          static u64 rgb(int r, int g, int b)
+          {
+              return GS_SETREG_RGBAQ(clamp255(r), clamp255(g), clamp255(b), 0x80, 0x00);
+          }
+
+          static int lerp_i(int a, int b, float t)
+          {
+              return (int)(a + (b - a) * t);
+          }
+
+          /* colour faded towards jungle haze with distance */
+          static u64 fogc(int r, int g, int b, float dist)
+          {
+              float f = 1.0f - dist * 0.06f;
+              float inv;
+              if (f < 0.28f)
+                  f = 0.28f;
+              inv = 1.0f - f;
+              return rgb((int)(r * f + 136 * inv), (int)(g * f + 170 * inv), (int)(b * f + 150 * inv));
+          }
+
+          static void rect(float x1, float y1, float x2, float y2, u64 c)
+          {
+              if (x1 < 0)
+                  x1 = 0;
+              if (y1 < 0)
+                  y1 = 0;
+              if (x2 > SW)
+                  x2 = SW;
+              if (y2 > SH)
+                  y2 = SH;
+              if (x2 <= x1 || y2 <= y1)
+                  return;
+              gsKit_prim_sprite(gs, x1, y1, x2, y2, 1, c);
+              if (++prim_count >= FLUSH_EVERY) {
+                  prim_count = 0;
+                  gsKit_queue_exec(gs);
+              }
+          }
+
+          /* 3x5 pixel font: bit 4 = left pixel, 2 = middle, 1 = right */
+          static const unsigned char FONT[42][5] = {
+              {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {6, 1, 2, 4, 7}, {6, 1, 2, 1, 6}, {5, 5, 7, 1, 1},
+              {7, 4, 6, 1, 6}, {3, 4, 7, 5, 7}, {7, 1, 2, 2, 2}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 6}, /* 0-9 */
+              {2, 5, 7, 5, 5}, {6, 5, 6, 5, 6}, {3, 4, 4, 4, 3}, {6, 5, 5, 5, 6}, {7, 4, 6, 4, 7},
+              {7, 4, 6, 4, 4}, {3, 4, 5, 5, 3}, {5, 5, 7, 5, 5}, {7, 2, 2, 2, 7}, {1, 1, 1, 5, 2},
+              {5, 5, 6, 5, 5}, {4, 4, 4, 4, 7}, {5, 7, 7, 5, 5}, {6, 5, 5, 5, 5}, {2, 5, 5, 5, 2},
+              {6, 5, 6, 4, 4}, {2, 5, 5, 7, 3}, {6, 5, 6, 5, 5}, {3, 4, 2, 1, 6}, {7, 2, 2, 2, 2},
+              {5, 5, 5, 5, 7}, {5, 5, 5, 5, 2}, {5, 5, 7, 7, 5}, {5, 5, 2, 5, 5}, {5, 5, 2, 2, 2},
+              {7, 1, 2, 4, 7},                                                                      /* A-Z */
+              {0, 0, 0, 0, 0}, {1, 1, 2, 4, 4}, {0, 0, 7, 0, 0}, {0, 2, 0, 2, 0}, {0, 0, 0, 0, 2},
+              {2, 2, 2, 0, 2}                                                  /* space / - : . ! */
+          };
+
+          static int glyph_index(char ch)
+          {
+              if (ch >= 'a' && ch <= 'z')
+                  ch = (char)(ch - 'a' + 'A');
+              if (ch >= '0' && ch <= '9')
+                  return ch - '0';
+              if (ch >= 'A' && ch <= 'Z')
+                  return 10 + (ch - 'A');
+              switch (ch) {
+                  case '/': return 37;
+                  case '-': return 38;
+                  case ':': return 39;
+                  case '.': return 40;
+                  case '!': return 41;
+                  default: break;
+              }
+              return 36;
+          }
+
+          static void text(float x, float y, float s, u64 colr, const char *str)
+          {
+              int row, cx, e;
+              for (; *str; str++) {
+                  const unsigned char *gl = FONT[glyph_index(*str)];
+                  for (row = 0; row < 5; row++) {
+                      int bits = gl[row];
+                      cx = 0;
+                      while (cx < 3) {
+                          if (bits & (4 >> cx)) {
+                              e = cx;
+                              while (e + 1 < 3 && (bits & (4 >> (e + 1))))
+                                  e++;
+                              rect(x + cx * s, y + row * s, x + (e + 1) * s, y + (row + 1) * s, colr);
+                              cx = e + 1;
+                          } else {
+                              cx++;
+                          }
+                      }
+                  }
+                  x += 4.0f * s;
+              }
+          }
+
+          static void text_shadow(float x, float y, float s, u64 colr, const char *str)
+          {
+              text(x + s * 0.6f, y + s * 0.6f, s, rgb(0, 0, 0), str);
+              text(x, y, s, colr, str);
+          }
+
+          static void text_center(float y, float s, u64 colr, const char *str)
+          {
+              float w = (float)strlen(str) * 4.0f * s - s;
+              text_shadow((SW - w) * 0.5f, y, s, colr, str);
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Map / collision / raycasting                                        */
+          /* ------------------------------------------------------------------ */
+
+          static void load_map(void)
+          {
+              int x, y;
+              for (y = 0; y < MAPH; y++) {
+                  for (x = 0; x < MAPW; x++) {
+                      char c = MAP_ROWS[y][x];
+                      map[y][x] = (c == '.') ? 0 : (unsigned char)(c - '0');
+                  }
+              }
+          }
+
+          static int blocked(float x, float y)
+          {
+              int mx = (int)x, my = (int)y;
+              if (x < 0.0f || y < 0.0f || mx >= MAPW || my >= MAPH)
+                  return 1;
+              return map[my][mx] != 0;
+          }
+
+          static int blocked_r(float x, float y, float r)
+          {
+              return blocked(x - r, y - r) || blocked(x + r, y - r) || blocked(x - r, y + r) ||
+                     blocked(x + r, y + r);
+          }
+
+          static void try_move(float *x, float *y, float dx, float dy, float r)
+          {
+              if (!blocked_r(*x + dx, *y, r))
+                  *x += dx;
+              if (!blocked_r(*x, *y + dy, r))
+                  *y += dy;
+          }
+
+          static int has_los(float x0, float y0, float x1, float y1)
+          {
+              float dx = x1 - x0, dy = y1 - y0;
+              float d = sqrtf(dx * dx + dy * dy);
+              int i, n = (int)(d / 0.2f) + 1;
+              for (i = 1; i < n; i++) {
+                  float t = (float)i / (float)n;
+                  if (blocked(x0 + dx * t, y0 + dy * t))
+                      return 0;
+              }
+              return 1;
+          }
+
+          /* DDA raycast; returns distance along the ray (ray direction scaled) */
+          static float cast_ray(float ox, float oy, float rdx, float rdy, int *type, int *side, float *wallx)
+          {
+              int mx = (int)ox, my = (int)oy;
+              float ddx = (rdx == 0.0f) ? 1e30f : fabsf(1.0f / rdx);
+              float ddy = (rdy == 0.0f) ? 1e30f : fabsf(1.0f / rdy);
+              float sdx, sdy, t, wx;
+              int stepx, stepy, s = 0, guard = 0;
+
+              *type = 1;
+              if (rdx < 0.0f) {
+                  stepx = -1;
+                  sdx = (ox - mx) * ddx;
+              } else {
+                  stepx = 1;
+                  sdx = (mx + 1.0f - ox) * ddx;
+              }
+              if (rdy < 0.0f) {
+                  stepy = -1;
+                  sdy = (oy - my) * ddy;
+              } else {
+                  stepy = 1;
+                  sdy = (my + 1.0f - oy) * ddy;
+              }
+
+              while (guard++ < 80) {
+                  if (sdx < sdy) {
+                      sdx += ddx;
+                      mx += stepx;
+                      s = 0;
+                  } else {
+                      sdy += ddy;
+                      my += stepy;
+                      s = 1;
+                  }
+                  if (mx < 0 || my < 0 || mx >= MAPW || my >= MAPH)
+                      break;
+                  if (map[my][mx]) {
+                      *type = map[my][mx];
+                      break;
+                  }
+              }
+
+              t = (s == 0) ? (sdx - ddx) : (sdy - ddy);
+              if (wallx) {
+                  wx = (s == 0) ? (oy + t * rdy) : (ox + t * rdx);
+                  *wallx = wx - floorf(wx);
+              }
+              *side = s;
+              return t;
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Game logic                                                          */
+          /* ------------------------------------------------------------------ */
+
+          static void reset_game(void)
+          {
+              int i;
+              px = 3.5f;
+              py = 3.5f;
+              pa = 0.45f;
+              php = 100.0f;
+              clip = CLIP_SIZE;
+              reserve = 36;
+              kills = 0;
+              reload_t = fire_t = muzzle_t = recoil = hurt_t = bob_t = bob_y = 0.0f;
+
+              for (i = 0; i < MAX_ENEMIES; i++) {
+                  Enemy *e = &enemies[i];
+                  e->x = ENEMY_START[i][0];
+                  e->y = ENEMY_START[i][1];
+                  e->hp = 100.0f;
+                  e->cool = 0.8f + rnd_f();
+                  e->flash = e->hurt = e->lost = 0.0f;
+                  e->wander = rnd_f() * 2.0f;
+                  e->wdir = rnd_f() * TWO_PI_F;
+                  e->alive = 1;
+                  e->state = 0;
+                  e->moving = 0;
+              }
+              for (i = 0; i < MAX_PICKUPS; i++) {
+                  pickups[i].x = PICKUP_START[i][0];
+                  pickups[i].y = PICKUP_START[i][1];
+                  pickups[i].type = (int)PICKUP_START[i][2];
+                  pickups[i].active = 1;
+              }
+          }
+
+          static void player_hurt(float dmg)
+          {
+              php -= dmg;
+              hurt_t = 0.35f;
+              if (php <= 0.0f) {
+                  php = 0.0f;
+                  game_state = ST_DEAD;
+              }
+          }
+
+          static float wrap_angle(float a)
+          {
+              while (a > PI_F)
+                  a -= TWO_PI_F;
+              while (a < -PI_F)
+                  a += TWO_PI_F;
+              return a;
+          }
+
+          static void player_shoot(void)
+          {
+              int i, t, s, best = -1;
+              float wall, bestd;
+
+              clip--;
+              fire_t = 0.28f;
+              muzzle_t = 0.07f;
+              recoil = 1.0f;
+
+              wall = cast_ray(px, py, cosf(pa), sinf(pa), &t, &s, NULL);
+              bestd = wall;
+
+              for (i = 0; i < MAX_ENEMIES; i++) {
+                  Enemy *e = &enemies[i];
+                  float dx, dy, d, ang, tol;
+                  if (!e->alive)
+                      continue;
+                  dx = e->x - px;
+                  dy = e->y - py;
+                  d = sqrtf(dx * dx + dy * dy);
+                  if (d < 0.2f)
+                      d = 0.2f;
+                  ang = wrap_angle(atan2f(dy, dx) - pa);
+                  tol = atan2f(0.26f, d);
+                  if (fabsf(ang) < tol && d < bestd) {
+                      best = i;
+                      bestd = d;
+                  }
+              }
+
+              if (best >= 0) {
+                  Enemy *e = &enemies[best];
+                  e->hp -= 34.0f;
+                  e->hurt = 0.18f;
+                  e->state = 1;
+                  e->lost = 0.0f;
+                  if (e->hp <= 0.0f) {
+                      e->alive = 0;
+                      kills++;
+                  }
+              }
+
+              /* gunfire alerts nearby guards */
+              for (i = 0; i < MAX_ENEMIES; i++) {
+                  Enemy *e = &enemies[i];
+                  float dx = e->x - px, dy = e->y - py;
+                  if (e->alive && dx * dx + dy * dy < 100.0f) {
+                      e->state = 1;
+                      e->lost = 0.0f;
+                  }
+              }
+          }
+
+          static void update_enemies(float dt)
+          {
+              int i;
+              for (i = 0; i < MAX_ENEMIES
