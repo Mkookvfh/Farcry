@@ -1,31 +1,35 @@
 #include <stdio.h>
-#include <gsKit.h>
+#include <draw.h>
+#include <graph.h>
+#include <dma.h>
 
-#define SCREEN_W 640
-#define SCREEN_H 448
+#define WIDTH   640
+#define HEIGHT  448
 
-static GSGLOBAL *gsGlobal;
+static u64 *frameBuf;
 
-void init_video(void)
+void initVideo(void)
 {
-	gsGlobal = gsKit_init_global();
-	gsGlobal->Mode = GS_MODE_NTSC;
-	gsGlobal->Width = SCREEN_W;
-	gsGlobal->Height = SCREEN_H;
-	gsGlobal->Interlace = GS_INTERLACED;
-	gsGlobal->Field = GS_FIELD;
-	gsKit_init(gsGlobal);
-	gsKit_set_display(gsGlobal);
+	// ตั้งโหมด NTSC 480i
+	setMode(MODE_NTSC);
+	setFbMode(PSM_CT32, WIDTH, HEIGHT);
+	frameBuf = getFrameBuffer();
 }
 
 int main(void)
 {
-	init_video();
+	initVideo();
+
 	while(1)
 	{
-		// สีพื้นสีน้ำเงินทดสอบว่าแสดงภาพได้
-		gsKit_clear(gsGlobal, 0xFF003366);
-		gsKit_swapbuffers(gsGlobal);
+		// เต็มหน้าจอด้วยสีน้ำเงินทดสอบ
+		int x,y;
+		for(y=0;y<HEIGHT;y++){
+			for(x=0;x<WIDTH;x++){
+				frameBuf[y*WIDTH + x] = 0xFF003366ULL;
+			}
+		}
+		vsyncWait();
 	}
-	return 0;
+	return 0;
 }
