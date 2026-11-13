@@ -13,7 +13,7 @@ jobs:
       - name: Install build tools
         run: apk add --no-cache build-base git
 
-      - name: Build game
+      - name: Write upgraded source code
         run: |
           cat > Makefile <<'MAKEFILE_EOF'
           EE_BIN = outpost_island.elf
@@ -21,180 +21,434 @@ jobs:
           EE_INCS += -I$(PS2DEV)/gsKit/include
           EE_LDFLAGS += -L$(PS2DEV)/gsKit/lib
           EE_LIBS = -lgskit -ldmakit -lpad -lm
-          EE_CFLAGS += -O2 -Wall
+          EE_CFLAGS += -O3 -Wall -funroll-loops -fomit-frame-pointer
           all: $(EE_BIN)
           include $(PS2SDK)/samples/Makefile.pref
           include $(PS2SDK)/samples/Makefile.eeglobal
           MAKEFILE_EOF
-          echo "PS2DEV=$PS2DEV PS2SDK=$PS2SDK"
-          base64 -d <<'DATA_EOF' | gunzip > main.c
-          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
-          DATA_EOF
-          wc -l main.c
+
+          cat > main.c <<'C_EOF'
+          #include <tamtypes.h>
+          #include <kernel.h>
+          #include <sifrpc.h>
+          #include <loadfile.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include <malloc.h>
+          #include <math.h>
+          #include <libpad.h>
+          #include <gsKit.h>
+          #include <dmaKit.h>
+          #include <gsToolkit.h>
+
+          #define SCREEN_W 640
+          #define SCREEN_H 448
+          #define MAP_W 32
+          #define MAP_H 32
+          #define TEX_SIZE 64
+          #define MAX_ENEMIES 10
+
+          static char padBuf[256] __attribute__((aligned(64)));
+
+          static const char WORLD_MAP[MAP_H][MAP_W + 1] = {
+              "11111111111111111111111111111111",
+              "1........................1....11",
+              "1.........................1...11",
+              "1.........33333.33..1..2.......1",
+              "1.........3......3...1...1.....1",
+              "1.........3......3.............1",
+              "1................3.............1",
+              "1.........3......3....333.333..1",
+              "11...1....33333.33....3.....3..1",
+              "1...111...............3.....3..1",
+              "1....1..111....1.11.........3..1",
+              "1.......1.......1.1...3.....3..1",
+              "1............1........333.333..1",
+              "1..............................1",
+              "1..............1...1...........1",
+              "1...333.3333..111121......11.111",
+              "11..3......3...1.12..11122.1...1",
+              "11.........3..2..22..1..2..11..1",
+              "1...3......3...................1",
+              "1...3......3..1..............1.1",
+              "1...3......3..1..333333.333....1",
+              "11..333.3333.....3........3....1",
+              "11...............3........3...21",
+              "11...............3........3....1",
+              "11.......111..1..3........3....1",
+              "1.........1...1...........3....1",
+              "11....112.21211..3........3....1",
+              "11.2.....1...22..333333.333....1",
+              "112..1111....................1.1",
+              "1111..111....1...............111",
+              "11111111111111111111111111111111",
+              "11111111111111111111111111111111"
+          };
+
+          typedef struct {
+              float x, y;
+              int hp;
+              int alive;
+              float hurt_timer;
+          } Enemy;
+
+          static Enemy enemies[MAX_ENEMIES];
+          static const float ENEMY_SPAWNS[MAX_ENEMIES][2] = {
+              {12.5f, 6.5f},  {14.5f, 5.5f},  {24.5f, 10.5f}, {26.5f, 8.5f},  {8.5f, 17.5f},
+              {21.5f, 23.5f}, {23.5f, 24.5f}, {16.5f, 13.5f}, {6.5f, 25.5f},  {27.5f, 19.5f}
+          };
+
+          static GSTEXTURE wallTex[4];
+          static GSTEXTURE enemyTex;
+          static float zBuffer[SCREEN_W];
+
+          // สร้าง Texture แบบ Procedural ใน RAM และอัปโหลดเข้า VRAM
+          static void create_textures(GSGLOBAL *gsGlobal) {
+              for (int t = 0; t < 4; t++) {
+                  wallTex[t].Width = TEX_SIZE;
+                  wallTex[t].Height = TEX_SIZE;
+                  wallTex[t].PSM = GS_PSM_CT32;
+                  wallTex[t].Filter = GS_FILTER_LINEAR;
+                  wallTex[t].Mem = (u32 *)memalign(128, TEX_SIZE * TEX_SIZE * 4);
+                  wallTex[t].Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(TEX_SIZE, TEX_SIZE, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+
+                  for (int y = 0; y < TEX_SIZE; y++) {
+                      for (int x = 0; x < TEX_SIZE; x++) {
+                          u8 r = 100, g = 100, b = 100;
+                          int noise = ((x * 37 + y * 17 + t * 53) & 31) - 16;
+
+                          if (t == 1) {
+                              // กำแพงหินเกาะ / อิฐ
+                              int brick = ((y / 8) % 2 == 0) ? (x % 16 == 0) : ((x + 8) % 16 == 0);
+                              if (y % 8 == 0 || brick) {
+                                  r = 55; g = 58; b = 52;
+                              } else {
+                                  r = 115 + noise; g = 122 + noise; b = 105 + noise;
+                              }
+                          } else if (t == 2) {
+                              // ประตูเหล็ก / โลหะสนิม
+                              int border = (x < 4 || x >= TEX_SIZE - 4 || y < 4 || y >= TEX_SIZE - 4);
+                              int stripe = ((x + y) / 6) % 2 == 0;
+                              if (border) {
+                                  r = 60; g = 65; b = 70;
+                              } else if (y > TEX_SIZE - 12 && stripe) {
+                                  r = 200; g = 160; b = 20;
+                              } else {
+                                  r = 90 + noise; g = 105 + noise; b = 120 + noise;
+                              }
+                          } else if (t == 3) {
+                              // บังเกอร์คอนกรีตลายพรางทหาร
+                              int camo = ((x / 8 + y / 6) % 3);
+                              if (camo == 0) { r = 65 + noise; g = 95 + noise; b = 55 + noise; }
+                              else if (camo == 1) { r = 95 + noise; g = 85 + noise; b = 60 + noise; }
+                              else { r = 45 + noise; g = 65 + noise; b = 45 + noise; }
+                          }
+                          wallTex[t].Mem[y * TEX_SIZE + x] = GS_SETREG_RGBAQ(r, g, b, 0x80, 0x00);
+                      }
+                  }
+                  gsKit_texture_upload(gsGlobal, &wallTex[t]);
+              }
+
+              // สร้าง Sprite ศัตรู (ทหารรับจ้าง)
+              enemyTex.Width = TEX_SIZE;
+              enemyTex.Height = TEX_SIZE;
+              enemyTex.PSM = GS_PSM_CT32;
+              enemyTex.Filter = GS_FILTER_LINEAR;
+              enemyTex.Mem = (u32 *)memalign(128, TEX_SIZE * TEX_SIZE * 4);
+              enemyTex.Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(TEX_SIZE, TEX_SIZE, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+
+              for (int y = 0; y < TEX_SIZE; y++) {
+                  for (int x = 0; x < TEX_SIZE; x++) {
+                      u32 col = GS_SETREG_RGBAQ(0, 0, 0, 0x00, 0x00); // โปร่งใส
+                      int dx = abs(x - 32);
+                      // หัว + หมวกเหล็ก
+                      if (y >= 8 && y <= 20 && dx <= 7) {
+                          col = (y < 14) ? GS_SETREG_RGBAQ(50, 75, 45, 0x80, 0x00) : GS_SETREG_RGBAQ(210, 165, 130, 0x80, 0x00);
+                      }
+                      // ลำตัว + เสื้อเกราะ
+                      else if (y > 20 && y <= 44 && dx <= 12) {
+                          col = GS_SETREG_RGBAQ(145, 45, 40, 0x80, 0x00);
+                          if (dx <= 6 && y > 24 && y < 38) col = GS_SETREG_RGBAQ(55, 60, 55, 0x80, 0x00);
+                      }
+                      // ขา
+                      else if (y > 44 && y <= 62 && dx >= 2 && dx <= 10) {
+                          col = GS_SETREG_RGBAQ(45, 55, 40, 0x80, 0x00);
+                      }
+                      enemyTex.Mem[y * TEX_SIZE + x] = col;
+                  }
+              }
+              gsKit_texture_upload(gsGlobal, &enemyTex);
+          }
+
+          static void reset_game(float *px, float *py, float *dirX, float *dirY, float *planeX, float *planeY, int *hp, int *ammo) {
+              *px = 3.5f; *py = 3.5f;
+              *dirX = 1.0f; *dirY = 0.0f;
+              *planeX = 0.0f; *planeY = 0.66f;
+              *hp = 100;
+              *ammo = 30;
+              for (int i = 0; i < MAX_ENEMIES; i++) {
+                  enemies[i].x = ENEMY_SPAWNS[i][0];
+                  enemies[i].y = ENEMY_SPAWNS[i][1];
+                  enemies[i].hp = 100;
+                  enemies[i].alive = 1;
+                  enemies[i].hurt_timer = 0.0f;
+              }
+          }
+
+          int main(int argc, char *argv[]) {
+              sceSifInitRpc(0);
+              sceSifLoadFileInit();
+              sceSifLoadModule("rom0:SIO2MAN", 0, NULL);
+              sceSifLoadModule("rom0:PADMAN", 0, NULL);
+
+              padInit(0);
+              padPortOpen(0, 0, padBuf);
+
+              GSGLOBAL *gsGlobal = gsKit_init_global();
+              gsGlobal->Mode = GS_MODE_NTSC;
+              gsGlobal->Interlace = GS_INTERLACED;
+              gsGlobal->Field = GS_FIELD;
+              gsGlobal->Width = SCREEN_W;
+              gsGlobal->Height = SCREEN_H;
+              gsGlobal->PSM = GS_PSM_CT32;
+              gsGlobal->PSMZ = GS_PSMZ_16S;
+              gsGlobal->DoubleBuffering = GS_SETTING_ON;
+              gsGlobal->ZBuffering = GS_SETTING_OFF;
+              gsGlobal->PrimAlphaEnable = GS_SETTING_ON;
+              gsGlobal->PrimAAEnable = GS_SETTING_ON;
+
+              dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+              dmaKit_chan_init(DMA_CHANNEL_GIF);
+
+              gsKit_init_screen(gsGlobal);
+              gsKit_mode_switch(gsGlobal, GS_ONESHOT);
+              gsKit_set_primalpha(gsGlobal, GS_SETREG_ALPHA(0, 1, 0, 1, 0), 0);
+              gsKit_set_test(gsGlobal, GS_ATEST_ON);
+
+              create_textures(gsGlobal);
+
+              float posX, posY, dirX, dirY, planeX, planeY;
+              int hp, ammo;
+              reset_game(&posX, &posY, &dirX, &dirY, &planeX, &planeY, &hp, &ammo);
+
+              float muzzle_timer = 0.0f;
+              float bob_phase = 0.0f;
+              u32 old_pad = 0;
+              struct padButtonStatus buttons;
+
+              // สีท้องฟ้าและพื้นดินแบบไล่เฉด (Gouraud Shading)
+              u64 skyTop = GS_SETREG_RGBAQ(25, 95, 185, 0x80, 0x00);
+              u64 skyHorizon = GS_SETREG_RGBAQ(155, 205, 235, 0x80, 0x00);
+              u64 groundHorizon = GS_SETREG_RGBAQ(35, 55, 30, 0x80, 0x00);
+              u64 groundBottom = GS_SETREG_RGBAQ(75, 110, 55, 0x80, 0x00);
+
+              while (1) {
+                  // อ่านค่าจอย PS2
+                  u32 pad_data = 0;
+                  int state = padGetState(0, 0);
+                  if (state == PAD_STATE_STABLE || state == PAD_STATE_FINDCTP1) {
+                      if (padRead(0, 0, &buttons) != 0) {
+                          pad_data = 0xFFFF ^ buttons.btns;
+                      }
+                  }
+                  u32 new_pad = pad_data & ~old_pad;
+                  old_pad = pad_data;
+
+                  float moveSpeed = (pad_data & PAD_L1) ? 0.14f : 0.08f;
+                  float rotSpeed = 0.055f;
+                  int moving = 0;
+
+                  // เดินหน้า / ถอยหลัง (D-Pad หรือ Analog ซ้าย)
+                  if ((pad_data & PAD_UP) || (buttons.ljoy_v < 80)) {
+                      if (WORLD_MAP[(int)posY][(int)(posX + dirX * moveSpeed * 2.0f)] == '.') posX += dirX * moveSpeed;
+                      if (WORLD_MAP[(int)(posY + dirY * moveSpeed * 2.0f)][(int)posX] == '.') posY += dirY * moveSpeed;
+                      moving = 1;
+                  }
+                  if ((pad_data & PAD_DOWN) || (buttons.ljoy_v > 175)) {
+                      if (WORLD_MAP[(int)posY][(int)(posX - dirX * moveSpeed * 2.0f)] == '.') posX -= dirX * moveSpeed;
+                      if (WORLD_MAP[(int)(posY - dirY * moveSpeed * 2.0f)][(int)posX] == '.') posY -= dirY * moveSpeed;
+                      moving = 1;
+                  }
+
+                  // หันซ้าย / ขวา (D-Pad หรือ Analog ขวา)
+                  float rot = 0.0f;
+                  if ((pad_data & PAD_LEFT) || (buttons.rjoy_h < 80)) rot = rotSpeed;
+                  if ((pad_data & PAD_RIGHT) || (buttons.rjoy_h > 175)) rot = -rotSpeed;
+                  if (rot != 0.0f) {
+                      float oldDirX = dirX;
+                      dirX = dirX * cosf(rot) - dirY * sinf(rot);
+                      dirY = oldDirX * sinf(rot) + dirY * cosf(rot);
+                      float oldPlaneX = planeX;
+                      planeX = planeX * cosf(rot) - planeY * sinf(rot);
+                      planeY = oldPlaneX * sinf(rot) + planeY * cosf(rot);
+                  }
+
+                  if (moving) bob_phase += 0.25f;
+                  if (muzzle_timer > 0.0f) muzzle_timer -= 0.15f;
+
+                  // รีโหลด (ปุ่ม Square)
+                  if (new_pad & PAD_SQUARE) ammo = 30;
+
+                  // ยิงปืน (ปุ่ม R1 หรือ X)
+                  if (((new_pad & PAD_R1) || (new_pad & PAD_CROSS)) && ammo > 0) {
+                      ammo--;
+                      muzzle_timer = 1.0f;
+                      // ตรวจสอบการยิงโดนศัตรูที่อยู่กลางจอ
+                      float bestDist = 999.0f;
+                      int hitIdx = -1;
+                      for (int i = 0; i < MAX_ENEMIES; i++) {
+                          if (!enemies[i].alive) continue;
+                          float dx = enemies[i].x - posX;
+                          float dy = enemies[i].y - posY;
+                          float dist = sqrtf(dx * dx + dy * dy);
+                          float dot = (dx * dirX + dy * dirY) / dist;
+                          if (dot > 0.96f && dist < bestDist) {
+                              bestDist = dist;
+                              hitIdx = i;
+                          }
+                      }
+                      if (hitIdx != -1) {
+                          enemies[hitIdx].hp -= 50;
+                          enemies[hitIdx].hurt_timer = 1.0f;
+                          if (enemies[hitIdx].hp <= 0) enemies[hitIdx].alive = 0;
+                      }
+                  }
+
+                  // รีเซ็ตเกมเมื่อกด Start
+                  if (new_pad & PAD_START) {
+                      reset_game(&posX, &posY, &dirX, &dirY, &planeX, &planeY, &hp, &ammo);
+                  }
+
+                  // 1. วาดท้องฟ้าและพื้นดินไล่เฉดสี (Gouraud Quad)
+                  gsKit_prim_quad_gouraud(gsGlobal, 0, 0, skyTop, SCREEN_W, 0, skyTop,
+                                          0, SCREEN_H / 2, skyHorizon, SCREEN_W, SCREEN_H / 2, skyHorizon, 0);
+                  gsKit_prim_quad_gouraud(gsGlobal, 0, SCREEN_H / 2, groundHorizon, SCREEN_W, SCREEN_H / 2, groundHorizon,
+                                          0, SCREEN_H, groundBottom, SCREEN_W, SCREEN_H, groundBottom, 0);
+
+                  // 2. Raycasting กำแพงพร้อม Texture + Distance Fog
+                  for (int x = 0; x < SCREEN_W; x += 2) {
+                      float cameraX = 2.0f * x / (float)SCREEN_W - 1.0f;
+                      float rayDirX = dirX + planeX * cameraX;
+                      float rayDirY = dirY + planeY * cameraX;
+
+                      int mapX = (int)posX;
+                      int mapY = (int)posY;
+
+                      float deltaDistX = (rayDirX == 0) ? 1e30f : fabsf(1.0f / rayDirX);
+                      float deltaDistY = (rayDirY == 0) ? 1e30f : fabsf(1.0f / rayDirY);
+                      float sideDistX, sideDistY, perpWallDist;
+                      int stepX, stepY, hit = 0, side = 0;
+
+                      if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
+                      else { stepX = 1; sideDistX = (mapX + 1.0f - posX) * deltaDistX; }
+
+                      if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
+                      else { stepY = 1; sideDistY = (mapY + 1.0f - posY) * deltaDistY; }
+
+                      while (hit == 0) {
+                          if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
+                          else { sideDistY += deltaDistY; mapY += stepY; side = 1; }
+                          if (WORLD_MAP[mapY][mapX] != '.') hit = WORLD_MAP[mapY][mapX] - '0';
+                      }
+
+                      if (side == 0) perpWallDist = (sideDistX - deltaDistX);
+                      else perpWallDist = (sideDistY - deltaDistY);
+                      if (perpWallDist < 0.1f) perpWallDist = 0.1f;
+
+                      zBuffer[x] = perpWallDist;
+                      zBuffer[x + 1] = perpWallDist;
+
+                      int lineHeight = (int)(SCREEN_H / perpWallDist);
+                      int drawStart = -lineHeight / 2 + SCREEN_H / 2;
+                      int drawEnd = lineHeight / 2 + SCREEN_H / 2;
+
+                      float wallX = (side == 0) ? (posY + perpWallDist * rayDirY) : (posX + perpWallDist * rayDirX);
+                      wallX -= floorf(wallX);
+                      float texX = wallX * (float)TEX_SIZE;
+
+                      // คำนวณความสว่างตามระยะทาง (Fog) และเงาด้านข้าง (Side Shading)
+                      float fog = 1.0f - (perpWallDist / 22.0f);
+                      if (fog < 0.15f) fog = 0.15f;
+                      if (fog > 1.0f) fog = 1.0f;
+                      if (side == 1) fog *= 0.78f;
+
+                      u8 shade = (u8)(128.0f * fog);
+                      u64 wallColor = GS_SETREG_RGBAQ(shade, shade, shade, 0x80, 0x00);
+
+                      int texID = (hit >= 1 && hit <= 3) ? hit : 1;
+                      gsKit_prim_sprite_texture(gsGlobal, &wallTex[texID],
+                          (float)x, (float)drawStart, texX, 0.0f,
+                          (float)(x + 2), (float)drawEnd, texX + 1.0f, (float)TEX_SIZE,
+                          1.0f, wallColor);
+                  }
+
+                  // 3. วาดศัตรู (Billboards) พร้อม Distance Fog
+                  for (int i = 0; i < MAX_ENEMIES; i++) {
+                      if (!enemies[i].alive) continue;
+                      if (enemies[i].hurt_timer > 0.0f) enemies[i].hurt_timer -= 0.1f;
+
+                      float spriteX = enemies[i].x - posX;
+                      float spriteY = enemies[i].y - posY;
+                      float invDet = 1.0f / (planeX * dirY - dirX * planeY);
+                      float transformX = invDet * (dirY * spriteX - dirX * spriteY);
+                      float transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+
+                      if (transformY > 0.2f) {
+                          int spriteScreenX = (int)((SCREEN_W / 2) * (1.0f + transformX / transformY));
+                          int spriteH = abs((int)(SCREEN_H / transformY));
+                          int spriteW = spriteH;
+                          int drawStartX = spriteScreenX - spriteW / 2;
+                          int drawStartY = SCREEN_H / 2 - spriteH / 2;
+
+                          if (spriteScreenX >= 0 && spriteScreenX < SCREEN_W && transformY < zBuffer[spriteScreenX]) {
+                              float fog = 1.0f - (transformY / 22.0f);
+                              if (fog < 0.2f) fog = 0.2f;
+                              u8 s = (u8)(128.0f * fog);
+                              u64 scol = (enemies[i].hurt_timer > 0.0f)
+                                  ? GS_SETREG_RGBAQ(128, 30, 30, 0x80, 0x00)
+                                  : GS_SETREG_RGBAQ(s, s, s, 0x80, 0x00);
+
+                              gsKit_prim_sprite_texture(gsGlobal, &enemyTex,
+                                  (float)drawStartX, (float)drawStartY, 0.0f, 0.0f,
+                                  (float)(drawStartX + spriteW), (float)(drawStartY + spriteH), (float)TEX_SIZE, (float)TEX_SIZE,
+                                  2.0f, scol);
+                          }
+                      }
+                  }
+
+                  // 4. วาดปืนในมือ + แรงสั่นเวลาเดิน + ประกายไฟตอนยิง (Muzzle Flash)
+                  float bobX = cosf(bob_phase) * 8.0f;
+                  float bobY = fabsf(sinf(bob_phase)) * 8.0f;
+                  float gunX = SCREEN_W * 0.62f + bobX;
+                  float gunY = SCREEN_H - 130.0f + bobY + (muzzle_timer * 15.0f);
+
+                  if (muzzle_timer > 0.0f) {
+                      u64 flashCol = GS_SETREG_RGBAQ(255, 200, 50, 0x60, 0x00);
+                      gsKit_prim_sprite(gsGlobal, gunX - 15, gunY - 45, gunX + 55, gunY + 25, 3.0f, flashCol);
+                  }
+                  // ตัวปืน
+                  gsKit_prim_sprite(gsGlobal, gunX + 10, gunY - 20, gunX + 30, gunY + 60, 3.0f, GS_SETREG_RGBAQ(45, 50, 55, 0x80, 0x00));
+                  gsKit_prim_sprite(gsGlobal, gunX, gunY + 20, gunX + 45, gunY + 140, 3.0f, GS_SETREG_RGBAQ(30, 35, 38, 0x80, 0x00));
+
+                  // 5. วาด Crosshair และแถบพลังชีวิต / กระสุน (HUD)
+                  u64 crossCol = GS_SETREG_RGBAQ(50, 255, 80, 0x80, 0x00);
+                  gsKit_prim_sprite(gsGlobal, SCREEN_W / 2 - 10, SCREEN_H / 2 - 1, SCREEN_W / 2 + 10, SCREEN_H / 2 + 1, 4.0f, crossCol);
+                  gsKit_prim_sprite(gsGlobal, SCREEN_W / 2 - 1, SCREEN_H / 2 - 10, SCREEN_W / 2 + 1, SCREEN_H / 2 + 10, 4.0f, crossCol);
+
+                  // กรอบ HUD ด้านล่าง
+                  gsKit_prim_sprite(gsGlobal, 20, SCREEN_H - 45, 240, SCREEN_H - 15, 4.0f, GS_SETREG_RGBAQ(10, 15, 10, 0x60, 0x00));
+                  // แถบ HP (สีแดง/เขียว)
+                  gsKit_prim_sprite(gsGlobal, 28, SCREEN_H - 37, 28 + (hp * 1.2f), SCREEN_H - 23, 4.0f, GS_SETREG_RGBAQ(200, 45, 45, 0x80, 0x00));
+                  // แถบ Ammo (สีเหลืองทอง)
+                  gsKit_prim_sprite(gsGlobal, 160, SCREEN_H - 37, 160 + (ammo * 2.2f), SCREEN_H - 23, 4.0f, GS_SETREG_RGBAQ(230, 185, 40, 0x80, 0x00));
+
+                  gsKit_queue_exec(gsGlobal);
+                  gsKit_sync_flip(gsGlobal);
+              }
+              return 0;
+          }
+          C_EOF
           make all
           ls -la outpost_island.elf
 
