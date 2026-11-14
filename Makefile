@@ -1,11 +1,8 @@
-EE_BIN = assassin_ps2.elf
-EE_OBJS = src/main.o src/player.o src/combat.o src/ai_npc.o
-EE_LIBS = ‑lmath
+TARGET = game_test
+SRC = src/main.c src/player.c src/combat.c src/ai_npc.c
 
-all: $(EE_BIN)
+all:
+	gcc $(SRC) -o $(TARGET) -lm
 
 clean:
-	rm ‑f $(EE_OBJS) $(EE_BIN)
-
-include $(PS2SDK)/samples/Makefile.pref
-include $(PS2SDK)/samples/Makefile.eeglobal
+	rm -f $(TARGET)
