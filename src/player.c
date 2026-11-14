@@ -17,7 +17,6 @@ void Player_SetAnim(int anim){
 }
 
 void Player_Update(float delta){
-    // ตัวอย่างรับอินพุตจอย PS2 (คุณต้องเติมโค้ดอ่านจอยจริงจากไลบรารี PS2 SDK)
     float move_x=0.0f, move_z=0.0f;
     float speed_walk=1.2f;
     float speed_run=3.0f;
@@ -28,13 +27,11 @@ void Player_Update(float delta){
     }else if(player.is_crouch){
         Player_SetAnim(ANIM_CROUCH);
     }else if(move_x!=0 || move_z!=0){
-        // ตรวจว่ากดวิ่งหรือไม่
-        // ถ้ากดปุ่มวิ่ง -> ANIM_RUN ไม่กด -> ANIM_WALK
         Player_SetAnim(ANIM_WALK);
     }else{
         Player_SetAnim(ANIM_IDLE);
     }
 
-    player.x += move_x * delta;
-    player.z += move_z * delta;
+    player.x += move_x * speed_walk * delta;
+    player.z += move_z * speed_walk * delta;
 }
