@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 #include "player.h"
 #include "combat.h"
 #include "ai_npc.h"
@@ -7,25 +8,24 @@ NPCGuard guard;
 
 int main(){
     Player_Init();
+    guard.x=3.0f; guard.z=3.0f;
     guard.alive=1;
     guard.alert_level=0;
 
-    float delta=0.016f; // ~60FPS
+    float delta=0.016f;
+    printf("✅ เริ่มโปรเจกต์ Assassin’s Creed (ทดสอบบนมือถือ Termux)\n");
 
-    while(1){
+    for(int i=0;i<30;i++){
         Player_Update(delta);
         NPC_Update(&guard, player.x, player.z, delta);
 
-        // ตัวอย่างทริกเกอร์ฆ่าเงียบ (กดปุ่มสมมติ)
-        /*
-        if( ปุ่มกด ){
-            if(Combat_CheckCanSilentKill(player.x,player.z,guard.x,guard.z,guard.rot)){
-                Combat_PlayFinisher(FINISHER_BACK_SILENT);
-                guard.alive=0;
-            }
+        // ทดลองเรียกฆ่าเงียบ
+        if(Combat_CheckCanSilentKill(player.x,player.z,guard.x,guard.z,guard.rot)){
+            Combat_PlayFinisher(FINISHER_BACK_SILENT);
+            guard.alive=0;
         }
-        */
-        // Render (ใส่โค้ดเรนเดอร์จาก PS2 SDK ตรงนี้)
+        usleep(16000);
     }
+    printf("✅ จบการทดลอง\n");
     return 0;
 }
