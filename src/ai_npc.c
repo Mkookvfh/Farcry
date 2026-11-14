@@ -1,4 +1,5 @@
 #include "ai_npc.h"
+#include <math.h>
 
 void NPC_Update(NPCGuard *g, float px, float pz, float delta){
     if(g‑>alive==0) return;
