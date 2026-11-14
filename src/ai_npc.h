@@ -5,7 +5,7 @@ typedef struct{
     float x,y,z;
     float rot;
     int alive;
-    int alert_level; //0 สงบ 1 สงสัย 2 ตามล่า
+    int alert_level;
 }NPCGuard;
 
 void NPC_Update(NPCGuard *g, float px, float pz, float delta);
